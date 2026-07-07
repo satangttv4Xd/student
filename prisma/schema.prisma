@@ -1,0 +1,171 @@
+// ---------------------------------------------------------------------------
+// Prisma Schema — ระบบลงทะเบียนเรียน GE หลักสูตร พ.ศ.2569
+//
+// ใช้ SQLite สำหรับ Demo. หากต้องการเปลี่ยนเป็น MySQL / PostgreSQL:
+//   1) แก้ datasource.provider เป็น "mysql" หรือ "postgresql"
+//   2) แก้ DATABASE_URL ใน .env
+//   3) รัน `npm run db:push`
+// หมายเหตุ: enum ใช้ได้กับ MySQL/PostgreSQL แต่ไม่รองรับใน SQLite
+//          จึงใช้ String + ค่าคงที่จาก src/types แทน เพื่อให้ย้าย DB ได้ง่าย
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------- โครงสร้างองค์กร ----------------------------
+
+/// คณะ / โรงเรียน
+model Faculty {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  majors    Major[]
+  students  Student[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// หลักสูตร / สาขาวิชา
+model Major {
+  id        Int       @id @default(autoincrement())
+  name      String
+  faculty   Faculty   @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  facultyId Int
+  /// จำนวนหน่วยกิต GE ที่หลักสูตรกำหนด (24 หรือ 30)
+  geCredits Int       @default(24)
+  students  Student[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([name, facultyId])
+}
+
+// ------------------------------- นักศึกษา -------------------------------
+
+/// นักศึกษา — ข้อมูลนำเข้าจากไฟล์ Excel "นักศึกษารหัส69.xlsx"
+model Student {
+  id             Int            @id @default(autoincrement())
+  studentId      String         @unique // รหัสนักศึกษา (ใช้ Login)
+  firstName      String // ชื่อ
+  lastName       String // นามสกุล
+  educationLevel String // ระดับการศึกษา เช่น ปริญญาตรี
+  campus         String // ศูนย์การศึกษา
+  studentType    String // ประเภทนักศึกษา เช่น ปกติ
+  academicYear   Int // ปีการศึกษา
+  semester       Int // เทอมการศึกษา
+
+  faculty   Faculty @relation(fields: [facultyId], references: [id])
+  facultyId Int
+  major     Major   @relation(fields: [majorId], references: [id])
+  majorId   Int
+
+  registrations Registration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([facultyId])
+  @@index([majorId])
+}
+
+// ------------------------ โครงสร้างรายวิชา GE ------------------------
+
+/// หมวดวิชา เช่น "หมวดวิชาศึกษาทั่วไป"
+model Category {
+  id            Int         @id @default(autoincrement())
+  name          String      @unique
+  /// จำนวนหน่วยกิตรวมของหมวด
+  totalCredits  Int         @default(24)
+  order         Int         @default(0)
+  skillGroups   SkillGroup[]
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+/// กลุ่มทักษะ (กลุ่มวิชา) เช่น "กลุ่มทักษะภาษา"
+model SkillGroup {
+  id         Int      @id @default(autoincrement())
+  /// รหัสอ้างอิงภายในระบบ เช่น LANGUAGE, LIFE_SOCIETY
+  code       String   @unique
+  name       String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId Int
+  /// จำนวนหน่วยกิตขั้นต่ำที่ต้องเรียนในกลุ่มนี้
+  requiredCredits Int @default(0)
+  /// จำนวนหน่วยกิตบังคับ (subset ของ requiredCredits)
+  compulsoryCredits Int @default(0)
+  order      Int      @default(0)
+  courses    Course[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+/// รายวิชา
+model Course {
+  id           Int      @id @default(autoincrement())
+  code         String   @unique // รหัสวิชา เช่น 1600201
+  name         String // ชื่อวิชา
+  credits      Int // จำนวนหน่วยกิต (เลขนำหน้า เช่น 3)
+  creditDetail String // รายละเอียดหน่วยกิต เช่น "3 (3-0-6)"
+  /// ประเภท: "REQUIRED" (วิชาบังคับ) | "ELECTIVE" (วิชาเลือก)
+  type         String   @default("ELECTIVE")
+
+  skillGroup   SkillGroup @relation(fields: [skillGroupId], references: [id], onDelete: Cascade)
+  skillGroupId Int
+
+  registrationItems RegistrationItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([skillGroupId])
+}
+
+// ------------------------- การลงทะเบียนเรียน -------------------------
+
+/// รอบ/ครั้งการลงทะเบียนของนักศึกษาในแต่ละภาคเรียน
+model Registration {
+  id           Int      @id @default(autoincrement())
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  studentId    Int
+  academicYear Int
+  semester     Int
+  /// สถานะ: "DRAFT" | "CONFIRMED" | "CANCELLED"
+  status       String   @default("CONFIRMED")
+  totalCredits Int      @default(0)
+  items        RegistrationItem[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([studentId])
+}
+
+/// รายวิชาที่ลงในแต่ละการลงทะเบียน (กันลงซ้ำวิชาเดียวกันในรอบเดียว)
+model RegistrationItem {
+  id             Int          @id @default(autoincrement())
+  registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  registrationId Int
+  course         Course       @relation(fields: [courseId], references: [id])
+  courseId       Int
+  createdAt      DateTime     @default(now())
+
+  @@unique([registrationId, courseId])
+  @@index([courseId])
+}
+
+// ------------------------------ ผู้ดูแลระบบ ------------------------------
+
+model Admin {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  /// เก็บเป็น hash (scrypt) — ดู src/lib/auth.ts
+  password  String
+  name      String   @default("ผู้ดูแลระบบ")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
