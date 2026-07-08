@@ -4,13 +4,19 @@
 // การตรวจสิทธิ์จริง (student/admin) ทำใน Server Component / Route Handler อีกชั้น
 // ---------------------------------------------------------------------------
 import { NextRequest, NextResponse } from "next/server";
-import { sessionOptions } from "@/lib/session";
+import { getIronSession } from "iron-session";
+import { sessionOptions, type AppSession } from "@/lib/session";
 
 const PUBLIC_PATHS = ["/login", "/admin/login"];
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-  const hasSession = req.cookies.has(sessionOptions.cookieName);
+
+  // ถอดรหัส session จริง — cookie เสีย/หมดอายุ/เข้ารหัสด้วย secret เก่า
+  // จะได้ session ว่าง (ไม่มี user) จึงถือว่ายังไม่ login และไม่เกิด redirect loop
+  const res = NextResponse.next();
+  const session = await getIronSession<AppSession>(req, res, sessionOptions);
+  const hasSession = Boolean(session.user);
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p);
 
@@ -28,7 +34,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  return res;
 }
 
 export const config = {
