@@ -5,7 +5,8 @@
   "description": "ระบบลงทะเบียนเรียนหมวดวิชาศึกษาทั่วไป (GE) หลักสูตร พ.ศ.2569",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "next lint",
     "db:generate": "prisma generate",
